@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { format, addMonths } from "date-fns";
 import { toast } from "react-hot-toast";
 
-// Import API functions (including verify_otp)
+// Import your API utilities
 import {
   getDoctors,
   authenticate_token,
@@ -17,14 +17,7 @@ import {
   verify_otp,
 } from "../utils/api";
 
-// Import UI components
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+// Import your UI components (Tailwind-based or custom)
 import {
   Card,
   CardContent,
@@ -42,29 +35,173 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Calendar as CalendarIcon } from "lucide-react";
-// Import the Tailwind Calendar component
 import { Calendar } from "@/components/ui/calendar";
 
-// Feature flag and questionnaire ID (fallback to 1 if not defined)
+// Env config for questionnaire
 const isQuestionnaireEnabled =
   process.env.NEXT_PUBLIC_QUESTIONNAIRE_ENABLED === "1";
 const questionnaireId = process.env.NEXT_PUBLIC_QUESTIONNAIRE_ID || 1;
 
-/* ----------------------------------------------------
-   Inline MedicalQuestionnaire Component Implementation
----------------------------------------------------- */
+/**
+ * DoctorTabbedInfo Component
+ * - Uses flex-wrap to prevent overflow on small screens.
+ * - Each tab is 50% (w-1/2) on mobile => 2 tabs per row
+ * - On sm: (≥640px), each tab is 25% (w-1/4) => all 4 on one row
+ */
+function DoctorTabbedInfo({ doctor }) {
+  const [activeTab, setActiveTab] = useState("about");
+
+  // Safely handle the "medicalAid" or "medical_aid" property
+  const rawMedicalAid = doctor.medicalAid || doctor.medical_aid;
+
+  // Fallback text for each property
+  const aboutText = doctor.about || "No about info provided.";
+  const qualificationsText = doctor.qualifications || "No qualifications provided.";
+  const pricingText = doctor.pricing || "No pricing info provided.";
+
+  let medicalAidText = "No medical aid info provided.";
+  if (rawMedicalAid) {
+    if (Array.isArray(rawMedicalAid)) {
+      medicalAidText = rawMedicalAid.join(", ");
+    } else {
+      medicalAidText = rawMedicalAid;
+    }
+  }
+
+  // Renders the content based on the activeTab
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case "about":
+        return <p>{aboutText}</p>;
+      case "qualifications":
+        return <p>{qualificationsText}</p>;
+      case "medicalAid":
+        return <p>{medicalAidText}</p>;
+      case "pricing":
+        return <p>{pricingText}</p>;
+      default:
+        return null;
+    }
+  };
+
+  // Tab styling
+  const tabBaseClasses = `
+    text-center px-4 py-2 text-sm sm:text-base
+    border-r last:border-r-0
+    transition-colors cursor-pointer
+    hover:opacity-90
+  `;
+  function tabClasses(tabName) {
+    const isActive = activeTab === tabName;
+    return isActive
+      ? `${tabBaseClasses} bg-primary text-white`
+      : `${tabBaseClasses} bg-secondary text-gray-800`;
+  }
+
+  return (
+    <div className="mt-4 border rounded-md bg-gray-100 w-full">
+      {/* Tabs row - flex-wrap so it won't overflow */}
+      <div className="flex flex-wrap w-full">
+        <div
+          onClick={() => setActiveTab("about")}
+          className={`w-1/2 sm:w-1/4 ${tabClasses("about")}`}
+        >
+          About
+        </div>
+        <div
+          onClick={() => setActiveTab("qualifications")}
+          className={`w-1/2 sm:w-1/4 ${tabClasses("qualifications")}`}
+        >
+          Qualifications
+        </div>
+        <div
+          onClick={() => setActiveTab("medicalAid")}
+          className={`w-1/2 sm:w-1/4 ${tabClasses("medicalAid")}`}
+        >
+          Medical Aid
+        </div>
+        <div
+          onClick={() => setActiveTab("pricing")}
+          className={`w-1/2 sm:w-1/4 ${tabClasses("pricing")}`}
+        >
+          Pricing
+        </div>
+      </div>
+
+      {/* Content area */}
+      <div className="p-4 bg-white rounded-b-md">{renderTabContent()}</div>
+    </div>
+  );
+}
+
+/**
+ * OTPInput Component
+ * Renders a row of input boxes for OTP
+ */
+function OTPInput({ length, value, onChange }) {
+  const inputsRef = useRef([]);
+
+  const handleInputChange = (e, index) => {
+    const inputValue = e.target.value;
+    if (!/^\d*$/.test(inputValue)) return; // digits only
+
+    let arr = value.split("");
+    while (arr.length < length) {
+      arr.push("");
+    }
+    arr[index] = inputValue.slice(-1); // keep last digit typed
+
+    const newOtp = arr.join("");
+    onChange(newOtp);
+
+    // Auto-focus next input
+    if (inputValue && index < length - 1) {
+      inputsRef.current[index + 1].focus();
+    }
+  };
+
+  const handleKeyDown = (e, index) => {
+    // If backspace on an empty box, move focus left
+    if (e.key === "Backspace" && !value[index] && index > 0) {
+      inputsRef.current[index - 1].focus();
+    }
+  };
+
+  // Build array of digits from "value"
+  const digits = Array.from({ length }, (_, i) => value[i] || "");
+
+  return (
+    <div className="grid grid-cols-6 gap-2 mb-4">
+      {digits.map((digit, idx) => (
+        <input
+          key={idx}
+          type="text"
+          inputMode="numeric"
+          maxLength={1}
+          value={digit}
+          onChange={(e) => handleInputChange(e, idx)}
+          onKeyDown={(e) => handleKeyDown(e, idx)}
+          ref={(el) => (inputsRef.current[idx] = el)}
+          className="w-12 h-12 text-center border rounded"
+        />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * MedicalQuestionnaire Component
+ */
 function MedicalQuestionnaire({ onFormDataChange, questionnaireFormData }) {
-  // Handle changes to an answer for a question.
   const handleChange = (e) => {
     const { name, value } = e.target;
     const index = parseInt(name, 10);
-    const updatedQuestions = questionnaireFormData.questions.map((question, i) =>
-      i === index ? { ...question, answer: value } : question
+    const updated = questionnaireFormData.questions.map((q, i) =>
+      i === index ? { ...q, answer: value } : q
     );
-    onFormDataChange({ ...questionnaireFormData, questions: updatedQuestions });
+    onFormDataChange({ ...questionnaireFormData, questions: updated });
   };
 
-  // Render the appropriate input based on question type.
   const renderInput = (question, index) => {
     if (question.question_type === "multiple_choice" && question.choices) {
       const choices = question.choices.split(",").map((c) => c.trim());
@@ -73,7 +210,7 @@ function MedicalQuestionnaire({ onFormDataChange, questionnaireFormData }) {
           name={index}
           value={question.answer || ""}
           onChange={handleChange}
-          className="border p-2 rounded"
+          className="border p-2 rounded w-full"
         >
           <option value="">Please select an option</option>
           {choices.map((choice, i) => (
@@ -84,95 +221,39 @@ function MedicalQuestionnaire({ onFormDataChange, questionnaireFormData }) {
         </select>
       );
     }
+
+    // Default is a textarea
     return (
       <textarea
         name={index}
         value={question.answer || ""}
         onChange={handleChange}
         placeholder="Please provide your answer"
-        className="border p-2 rounded"
+        className="border p-2 rounded w-full"
       />
     );
   };
 
   return (
-    <div className="p-4 border rounded my-4">
+    <div className="p-4 border rounded my-4 w-full">
       <h3 className="text-lg font-bold mb-2">{questionnaireFormData.name}</h3>
       <p className="text-sm text-gray-500 mb-4">
         Please complete this brief medical questionnaire to help us better
         prepare for your appointment.
       </p>
-      {questionnaireFormData.questions?.map((question, index) => (
-        <div key={index} className="flex flex-col space-y-1 mb-3">
+      {questionnaireFormData.questions?.map((question, idx) => (
+        <div key={idx} className="flex flex-col space-y-1 mb-3">
           <label className="font-semibold">{question.question_text}</label>
-          {renderInput(question, index)}
+          {renderInput(question, idx)}
         </div>
       ))}
     </div>
   );
 }
 
-/* ----------------------------------------------------
-   OTPInput Component
-   Renders multiple inputs with one digit per block.
----------------------------------------------------- */
-function OTPInput({ length, value, onChange }) {
-  const inputsRef = useRef([]);
-
-  const handleInputChange = (e, index) => {
-    const inputValue = e.target.value;
-    // Allow only digits
-    if (!/^\d*$/.test(inputValue)) {
-      return;
-    }
-    // Create an array of digits from the current value
-    let newValueArr = value.split("");
-    // Ensure the array has the correct length
-    while (newValueArr.length < length) {
-      newValueArr.push("");
-    }
-    // Take only the last character (in case someone pastes more than one digit)
-    newValueArr[index] = inputValue.slice(-1);
-    const otpStr = newValueArr.join("");
-    onChange(otpStr);
-    // Automatically focus the next input if a digit was entered
-    if (inputValue && index < length - 1) {
-      inputsRef.current[index + 1].focus();
-    }
-  };
-
-  const handleKeyDown = (e, index) => {
-    // On Backspace, if the current input is empty, move focus to the previous input
-    if (e.key === "Backspace" && !value[index] && index > 0) {
-      inputsRef.current[index - 1].focus();
-    }
-  };
-
-  // Build an array with each digit (or empty string if not provided)
-  const otpDigits = Array.from({ length }, (_, i) => value[i] || "");
-
-  return (
-    <div className="flex space-x-2 mb-4">
-      {otpDigits.map((digit, index) => (
-        <input
-          key={index}
-          type="text"
-          inputMode="numeric"
-          maxLength={1}
-          value={digit}
-          onChange={(e) => handleInputChange(e, index)}
-          onKeyDown={(e) => handleKeyDown(e, index)}
-          ref={(el) => (inputsRef.current[index] = el)}
-          className="w-12 h-12 text-center border rounded"
-        />
-      ))}
-    </div>
-  );
-}
-
-/* ----------------------------------------------------
-   AuthModal Component (with controlled OTP input)
----------------------------------------------------- */
+/**
+ * AuthModal Component (login + OTP)
+ */
 function AuthModal({
   isOpen,
   onClose,
@@ -185,11 +266,12 @@ function AuthModal({
   setOtp,
 }) {
   if (!isOpen) return null;
+
   return (
     <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
       <div className="bg-white p-6 rounded-md w-80">
         {authStage === "login" ? (
-          <div>
+          <>
             <h2 className="text-lg font-semibold mb-4">Login</h2>
             <Label htmlFor="phone-modal">Phone Number</Label>
             <Input
@@ -206,12 +288,11 @@ function AuthModal({
               </Button>
               <Button onClick={() => onLogin(phone)}>Send OTP</Button>
             </div>
-          </div>
+          </>
         ) : (
-          <div>
+          <>
             <h2 className="text-lg font-semibold mb-4">Enter OTP</h2>
             <Label htmlFor="otp-input">OTP</Label>
-            {/* Use OTPInput to render one digit per input block */}
             <OTPInput length={6} value={otp} onChange={setOtp} />
             <div className="flex justify-end space-x-2">
               <Button variant="outline" onClick={onClose}>
@@ -219,26 +300,27 @@ function AuthModal({
               </Button>
               <Button onClick={() => onOtpSubmit(otp)}>Verify OTP</Button>
             </div>
-          </div>
+          </>
         )}
       </div>
     </div>
   );
 }
 
-/* ----------------------------------------------------
-   SuccessModal Component
----------------------------------------------------- */
+/**
+ * SuccessModal Component
+ */
 function SuccessModal({ isOpen, onClose, onViewAppointments }) {
   if (!isOpen) return null;
+
   return (
     <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
       <div className="bg-white p-6 rounded-md w-80 text-center">
         <h2 className="text-lg font-semibold mb-4">Appointment Created</h2>
         <p className="mb-4">
           Your provisional appointment has been created. The doctor will review
-          and confirm your appointment shortly, please await confirmation BEFORE
-          attending. You can track the status in the Manage Appointment section.
+          and confirm your appointment shortly. Please await confirmation before
+          attending.
         </p>
         <div className="flex justify-center space-x-2">
           <Button variant="outline" onClick={onClose}>
@@ -251,80 +333,74 @@ function SuccessModal({ isOpen, onClose, onViewAppointments }) {
   );
 }
 
-/* ----------------------------------------------------
-   Main BookAppointmentNew Component
----------------------------------------------------- */
+/**
+ * Main BookAppointmentNew Page
+ */
 export default function BookAppointmentNew() {
   const router = useRouter();
 
-  // Appointment and auth state
   const [doctors, setDoctors] = useState([]);
   const [selectedDoctor, setSelectedDoctor] = useState(null);
   const [patient, setPatient] = useState(null);
+
+  // Auth flow
   const [authStage, setAuthStage] = useState("login");
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [phone, setPhone] = useState("");
-
-  // Controlled OTP state
   const [otp, setOtp] = useState("");
 
+  // Appointment form data
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [appointmentDate, setAppointmentDate] = useState(null);
   const [appointmentTime, setAppointmentTime] = useState("");
   const [termsAccepted, setTermsAccepted] = useState(false);
 
+  // Other data
   const [appointmentData, setAppointmentData] = useState(null);
   const [availableTimes, setAvailableTimes] = useState([]);
   const [questionnaireData, setQuestionnaireData] = useState(null);
 
+  // Modals
   const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
 
-  // On mount, fetch doctors and check authentication
+  // On mount
   useEffect(() => {
     fetchDoctors();
     checkAuthentication();
   }, []);
 
-  // Fetch the questionnaire if enabled
+  // Fetch questionnaire if enabled
   useEffect(() => {
     if (isQuestionnaireEnabled) {
       getQuestionnaire(questionnaireId)
-        .then((response) => {
-          // Expect response.data to contain "name" and "questions"
-          setQuestionnaireData(response.data);
+        .then((res) => {
+          setQuestionnaireData(res.data);
         })
-        .catch((error) => {
-          console.error("Error fetching questionnaire:", error);
+        .catch((err) => {
+          console.error("Error fetching questionnaire:", err);
           toast.error("Failed to load questionnaire.");
         });
     }
-  }, [isQuestionnaireEnabled]);
+  }, []);
 
-  // Fetch available times (start and end date are the same)
+  // Fetch times if doc + date
   useEffect(() => {
     if (selectedDoctor && appointmentDate) {
-      const formattedDate = format(appointmentDate, "yyyy-MM-dd");
-      console.log(
-        "Fetching available times for doctor",
-        selectedDoctor.id,
-        "for date",
-        formattedDate
-      );
-      getAvailableTimes(selectedDoctor.id, formattedDate, formattedDate)
-        .then((response) => {
-          const dataForDoctor = response.data[selectedDoctor.id];
+      const formatted = format(appointmentDate, "yyyy-MM-dd");
+      getAvailableTimes(selectedDoctor.id, formatted, formatted)
+        .then((res) => {
+          const dataForDoc = res.data[selectedDoctor.id];
           const times =
-            dataForDoctor &&
-            dataForDoctor.available_appointments &&
-            dataForDoctor.available_appointments[formattedDate]
-              ? dataForDoctor.available_appointments[formattedDate]
+            dataForDoc &&
+            dataForDoc.available_appointments &&
+            dataForDoc.available_appointments[formatted]
+              ? dataForDoc.available_appointments[formatted]
               : [];
-          console.log("Available times from API:", times);
           setAvailableTimes(times);
         })
-        .catch((error) => {
-          console.error("Error fetching available times:", error);
+        .catch((err) => {
+          console.error("Error fetching times:", err);
           toast.error("Failed to load available times.");
           setAvailableTimes([]);
         });
@@ -333,7 +409,7 @@ export default function BookAppointmentNew() {
     }
   }, [selectedDoctor, appointmentDate]);
 
-  // Helper functions
+  // Fetch doctors
   const fetchDoctors = async () => {
     try {
       const response = await getDoctors();
@@ -345,20 +421,21 @@ export default function BookAppointmentNew() {
     }
   };
 
+  // Check auth
   const checkAuthentication = async () => {
     const token = localStorage.getItem("authToken");
     if (token) {
       try {
-        const response = await authenticate_token(token);
-        setPatient(response.data.patient);
-      } catch (error) {
+        const resp = await authenticate_token(token);
+        setPatient(resp.data.patient);
+      } catch (err) {
         toast.error("Authentication failed. Please log in again.");
         localStorage.removeItem("authToken");
       }
     }
   };
 
-  // When the user clicks "Book Appointment"
+  // Book appointment
   const handleBookAppointment = async () => {
     if (!selectedDoctor) {
       toast.error("Please select a doctor.");
@@ -374,7 +451,6 @@ export default function BookAppointmentNew() {
     }
 
     const formattedDate = format(appointmentDate, "yyyy-MM-dd");
-
     const data = {
       doctor_id: selectedDoctor.id,
       date: formattedDate,
@@ -403,7 +479,7 @@ export default function BookAppointmentNew() {
     }
   };
 
-  // Trigger OTP request via backend and open OTP modal
+  // Trigger OTP if not logged in
   const triggerOtpRequest = async () => {
     try {
       await createPatient({ contact_number: phone });
@@ -415,12 +491,12 @@ export default function BookAppointmentNew() {
     }
   };
 
-  // Handle OTP submission using backend verification
+  // OTP submission
   const handleOtpSubmit = async (submittedOtp) => {
     try {
-      const response = await verify_otp(phone, submittedOtp);
-      localStorage.setItem("authToken", response.data.token);
-      setPatient(response.data.patient);
+      const resp = await verify_otp(phone, submittedOtp);
+      localStorage.setItem("authToken", resp.data.token);
+      setPatient(resp.data.patient);
       setIsAuthModalOpen(false);
       toast.success("OTP verified successfully!");
       setOtp("");
@@ -431,6 +507,7 @@ export default function BookAppointmentNew() {
     }
   };
 
+  // Create appointment
   const createAppointmentWithAuth = async (data) => {
     try {
       await createAppointment(data);
@@ -446,6 +523,7 @@ export default function BookAppointmentNew() {
     }
   };
 
+  // Login from modal
   const handleLogin = async (phoneNumber) => {
     setPhone(phoneNumber);
     try {
@@ -457,6 +535,7 @@ export default function BookAppointmentNew() {
     }
   };
 
+  // Close modals
   const closeAuthModal = () => {
     setIsAuthModalOpen(false);
     setAuthStage("login");
@@ -467,48 +546,56 @@ export default function BookAppointmentNew() {
     setIsSuccessModalOpen(false);
   };
 
-  // IMPORTANT: Route to "/manage-appointment" (singular) on viewing appointments
   const handleViewAppointments = () => {
     setIsSuccessModalOpen(false);
     router.push("/manage-appointment");
   };
 
+  // Render
   return (
-    <div className="container mx-auto py-8 px-4">
-      <h1 className="text-3xl font-bold mb-8 text-center">Book an Appointment</h1>
+    <div className="mx-auto w-full max-w-3xl py-8 px-4">
+      <h1 className="text-3xl font-bold mb-8">Book an Appointment</h1>
 
       {/* Doctor Selection */}
-      <div className="mb-6">
-        <Label htmlFor="doctor">Select a Doctor</Label>
-        <Select
-          onValueChange={(value) =>
-            setSelectedDoctor(doctors.find((d) => d.id === parseInt(value)))
-          }
-        >
-          <SelectTrigger>
-            <SelectValue placeholder="Choose your doctor" />
-          </SelectTrigger>
-          <SelectContent>
+      <div className="mb-6 w-full">
+        <Label htmlFor="doctor" className="text-xl font-semibold mb-2 block">
+          Select a Doctor
+        </Label>
+        <div className="relative w-full">
+          <select
+            className="block w-full rounded border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:outline-none"
+            onChange={(e) =>
+              setSelectedDoctor(
+                doctors.find((d) => d.id === parseInt(e.target.value))
+              )
+            }
+            defaultValue=""
+          >
+            <option value="" disabled>
+              Choose your doctor
+            </option>
             {doctors.map((doctor) => (
-              <SelectItem key={doctor.id} value={doctor.id.toString()}>
+              <option key={doctor.id} value={doctor.id}>
                 {`${doctor.first_name} ${doctor.last_name}`}
-              </SelectItem>
+              </option>
             ))}
-          </SelectContent>
-        </Select>
+          </select>
+        </div>
       </div>
 
-      {/* Show booking form only after a doctor is selected */}
+      {/* Doctor info & booking form */}
       {selectedDoctor && (
         <>
-          {/* Doctor Profile */}
-          <Card className="mb-6">
+          <Card className="mb-6 w-full">
             <CardHeader>
-              <CardTitle>Doctor Profile</CardTitle>
+              <CardTitle className="text-xl font-semibold">
+                {`${selectedDoctor.first_name} ${selectedDoctor.last_name}`}
+              </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="flex items-start space-x-4">
-                <Avatar className="h-24 w-24">
+            <CardContent>
+              {/* Only center the avatar */}
+              <div className="flex items-center justify-center mb-4">
+                <Avatar className="h-20 w-20">
                   {selectedDoctor.image ? (
                     <AvatarImage
                       src={selectedDoctor.image}
@@ -520,76 +607,58 @@ export default function BookAppointmentNew() {
                     </AvatarFallback>
                   )}
                 </Avatar>
-                <div className="space-y-2">
-                  <h3 className="text-xl font-semibold">
-                    {`${selectedDoctor.first_name} ${selectedDoctor.last_name}`}
-                  </h3>
-                  <p className="text-muted-foreground">{selectedDoctor.about}</p>
-                  <p className="font-medium">
-                    Qualifications: {selectedDoctor.qualifications}
-                  </p>
-                  {selectedDoctor.medicalAid && (
-                    <div>
-                      <p className="font-medium">Accepted Medical Aid:</p>
-                      <ul className="list-disc list-inside text-sm">
-                        {selectedDoctor.medicalAid.map((aid) => (
-                          <li key={aid}>{aid}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                  {selectedDoctor.pricing && (
-                    <p className="font-medium text-primary">
-                      {selectedDoctor.pricing}
-                    </p>
-                  )}
-                </div>
               </div>
+
+              <DoctorTabbedInfo doctor={selectedDoctor} />
             </CardContent>
           </Card>
 
           {/* Booking Form */}
-          <div className="space-y-6">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="firstName">First Name</Label>
-                <Input
-                  id="firstName"
-                  placeholder="Enter your first name"
-                  value={firstName}
-                  onChange={(e) => setFirstName(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="lastName">Last Name</Label>
-                <Input
-                  id="lastName"
-                  placeholder="Enter your last name"
-                  value={lastName}
-                  onChange={(e) => setLastName(e.target.value)}
-                />
-              </div>
+          <div className="w-full space-y-6 mb-12">
+            {/* First Name */}
+            <div className="space-y-2">
+              <Label htmlFor="firstName">First Name</Label>
+              <Input
+                id="firstName"
+                placeholder="Enter your first name"
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+              />
             </div>
 
+            {/* Last Name */}
+            <div className="space-y-2">
+              <Label htmlFor="lastName">Last Name</Label>
+              <Input
+                id="lastName"
+                placeholder="Enter your last name"
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+              />
+            </div>
+
+            {/* Phone */}
             <div className="space-y-2">
               <Label htmlFor="phone">Cellphone Number</Label>
               <Input
                 id="phone"
-                placeholder="Enter your cellphone number"
                 type="tel"
+                placeholder="Enter your cellphone number"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
               />
             </div>
 
-            <div className="space-y-2">
-              <Label>Appointment Date & Time</Label>
-              <div className="flex flex-col sm:flex-row gap-4">
+            {/* Date/Time side-by-side on sm+ */}
+            <div className="flex flex-col sm:flex-row gap-4">
+              {/* Date */}
+              <div className="flex-1 space-y-2">
+                <Label className="block font-semibold">Select Date</Label>
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button
                       variant="outline"
-                      className="justify-start text-left font-normal w-full sm:w-[240px]"
+                      className="justify-start text-left font-normal w-full"
                     >
                       <CalendarIcon className="mr-2 h-4 w-4" />
                       {appointmentDate
@@ -602,6 +671,7 @@ export default function BookAppointmentNew() {
                       mode="single"
                       selected={appointmentDate}
                       onSelect={setAppointmentDate}
+                      initialFocus
                       disabled={{
                         before: new Date(),
                         after: addMonths(new Date(), 1),
@@ -609,29 +679,38 @@ export default function BookAppointmentNew() {
                     />
                   </PopoverContent>
                 </Popover>
+              </div>
 
-                <Select onValueChange={(value) => setAppointmentTime(value)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select time" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableTimes.length > 0 ? (
-                      availableTimes.map((time, index) => (
-                        <SelectItem key={index} value={time}>
-                          {time}
-                        </SelectItem>
-                      ))
-                    ) : (
-                      <SelectItem disabled value="none">
-                        No available times
-                      </SelectItem>
-                    )}
-                  </SelectContent>
-                </Select>
+              {/* Time Bubbles */}
+              <div className="flex-1 space-y-2">
+                <Label className="block font-semibold">Select Time</Label>
+                <div className="flex flex-wrap gap-2">
+                  {availableTimes.length > 0 ? (
+                    availableTimes.map((time, index) => (
+                      <button
+                        key={index}
+                        type="button"
+                        onClick={() => setAppointmentTime(time)}
+                        className={`
+                          px-4 py-2 rounded-full border-2 transition-colors text-sm
+                          ${
+                            appointmentTime === time
+                              ? "bg-primary text-white border-primary"
+                              : "bg-white text-gray-800 border-gray-300 hover:bg-gray-100"
+                          }
+                        `}
+                      >
+                        {time}
+                      </button>
+                    ))
+                  ) : (
+                    <p className="text-sm text-gray-500">No available times</p>
+                  )}
+                </div>
               </div>
             </div>
 
-            {/* Questionnaire Section */}
+            {/* Optional Questionnaire */}
             {isQuestionnaireEnabled &&
               questionnaireData &&
               questionnaireData.questions && (
@@ -641,6 +720,7 @@ export default function BookAppointmentNew() {
                 />
               )}
 
+            {/* Terms Checkbox */}
             <div className="flex items-center space-x-2">
               <Checkbox
                 id="terms"
@@ -650,8 +730,8 @@ export default function BookAppointmentNew() {
                 }
               />
               <Label htmlFor="terms" className="text-sm">
-                I agree to the terms and conditions and consent to the processing
-                of my personal information
+                I agree to the terms and conditions and consent to the
+                processing of my personal information
               </Label>
             </div>
 
