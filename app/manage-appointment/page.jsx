@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { toast } from "react-hot-toast";
 
-// Import API functions (ensure these are exported from your API file)
+// Import only what's needed; remove editAppointment
 import {
   authenticate_token,
   getPatientAppointments,
@@ -13,28 +13,17 @@ import {
   generate_otp,
   verify_otp,
   changeAppointmentStatus,
-  editAppointment,
 } from "../utils/api";
 
-// Import UI components from dbs-new design
+// UI components
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-
-// Import icons from lucide-react
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Edit2, X } from "lucide-react";
 
-// Basic container styling
 const containerClass = "container mx-auto py-8 px-4";
 
 export default function ManageAppointment() {
@@ -51,7 +40,7 @@ export default function ManageAppointment() {
   const [authStage, setAuthStage] = useState("checking");
   const [contactNumber, setContactNumber] = useState("");
 
-  // OTP state: 6-digit array (for OTP UI)
+  // OTP state
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
 
   // State for editing/cancelling appointments
@@ -60,8 +49,8 @@ export default function ManageAppointment() {
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
   const [appointmentToCancel, setAppointmentToCancel] = useState(null);
 
-  // -----------------------
-  // Helper: fetch appointments for a patient.
+  // --------------------------------------------------
+  // FETCH APPOINTMENTS
   const fetchAppointments = useCallback(async (patientId) => {
     try {
       const response = await getPatientAppointments(patientId);
@@ -75,13 +64,12 @@ export default function ManageAppointment() {
     }
   }, []);
 
-  // Helper: fetch cancelled appointments.
   const fetchCancelledAppointments = useCallback(async (patientId) => {
     try {
       const cancelledData = await getCancelledAppointments(patientId);
       if (Array.isArray(cancelledData)) {
         setCancelledAppointments(
-          cancelledData.map((appointment) => ({ ...appointment, status: "CNC" }))
+          cancelledData.map((appt) => ({ ...appt, status: "CNC" }))
         );
       } else {
         console.error("Invalid cancelled appointments data:", cancelledData);
@@ -94,8 +82,8 @@ export default function ManageAppointment() {
     }
   }, []);
 
-  // -----------------------
-  // Check for token authentication on mount.
+  // --------------------------------------------------
+  // AUTH CHECK
   const checkAuthentication = useCallback(async () => {
     const token = localStorage.getItem("authToken");
     if (!token) {
@@ -121,8 +109,8 @@ export default function ManageAppointment() {
     checkAuthentication();
   }, [checkAuthentication]);
 
-  // -----------------------
-  // OTP Input Handlers for 6 inputs.
+  // --------------------------------------------------
+  // OTP LOGIC
   const handleOtpChange = (index, value) => {
     if (value.length <= 1 && /^\d*$/.test(value)) {
       const newOtp = [...otp];
@@ -142,11 +130,8 @@ export default function ManageAppointment() {
     }
   };
 
-  // Join the 6-digit OTP into a string.
   const joinOtp = () => otp.join("");
 
-  // -----------------------
-  // Handle login: request OTP.
   const handleLogin = async (phone) => {
     setContactNumber(phone);
     try {
@@ -164,8 +149,6 @@ export default function ManageAppointment() {
     }
   };
 
-  // -----------------------
-  // Handle OTP submission using backend verification.
   const handleOtpSubmit = async () => {
     const otpString = joinOtp();
     try {
@@ -185,8 +168,8 @@ export default function ManageAppointment() {
     }
   };
 
-  // -----------------------
-  // Logout function.
+  // --------------------------------------------------
+  // LOGOUT
   const handleLogout = () => {
     localStorage.removeItem("authToken");
     setPatient(null);
@@ -197,8 +180,9 @@ export default function ManageAppointment() {
     toast.success("Logged out successfully.");
   };
 
-  // -----------------------
-  // Functions for editing and cancelling appointments.
+  // --------------------------------------------------
+  // EDIT (No Actual Logic)
+  // 1) Open the edit modal
   const openEditModal = (appointment) => {
     setAppointmentToEdit(appointment);
     setIsEditModalOpen(true);
@@ -209,6 +193,8 @@ export default function ManageAppointment() {
     setAppointmentToEdit(null);
   };
 
+  // --------------------------------------------------
+  // CANCEL LOGIC
   const openCancelModal = (appointment) => {
     setAppointmentToCancel(appointment);
     setIsCancelModalOpen(true);
@@ -221,12 +207,21 @@ export default function ManageAppointment() {
 
   const cancelAppointment = async () => {
     try {
-      // Note: Passing "CNC" as the appointment status.
-      await changeAppointmentStatus(appointmentToCancel.id, "CNC");
-      // Remove the cancelled appointment from upcoming appointments.
-      setAppointments(appointments.filter((appt) => appt.id !== appointmentToCancel.id));
-      // Add to cancelled appointments.
-      setCancelledAppointments([...cancelledAppointments, { ...appointmentToCancel, status: "CNC" }]);
+      await changeAppointmentStatus(appointmentToCancel.id, "CNC", {
+        old_appointment_dt: {
+          date: appointmentToCancel.date,
+          time: appointmentToCancel.time,
+        },
+      });
+      // Remove from upcoming appointments
+      setAppointments((prev) =>
+        prev.filter((appt) => appt.id !== appointmentToCancel.id)
+      );
+      // Add to cancelled
+      setCancelledAppointments((prev) => [
+        ...prev,
+        { ...appointmentToCancel, status: "CNC" },
+      ]);
       toast.success("Appointment cancelled successfully.");
     } catch (error) {
       toast.error("Failed to cancel appointment. Please try again.");
@@ -234,19 +229,8 @@ export default function ManageAppointment() {
     closeCancelModal();
   };
 
-  const onEditAppointmentSubmission = async (updatedAppointment) => {
-    try {
-      await editAppointment(updatedAppointment.id, updatedAppointment);
-      closeEditModal();
-      await fetchAppointments(patient.id);
-      toast.success("Appointment updated successfully.");
-    } catch (error) {
-      toast.error("Failed to update appointment. Please try again.");
-    }
-  };
-
-  // -----------------------
-  // Categorize appointments.
+  // --------------------------------------------------
+  // CATEGORIZE APPOINTMENTS
   const getUpcomingAppointments = () => {
     const now = new Date();
     return appointments
@@ -255,7 +239,8 @@ export default function ManageAppointment() {
         return apptDateTime >= now;
       })
       .sort(
-        (a, b) => new Date(`${a.date}T${a.time}`) - new Date(`${b.date}T${b.time}`)
+        (a, b) =>
+          new Date(`${a.date}T${a.time}`) - new Date(`${b.date}T${b.time}`)
       );
   };
 
@@ -267,7 +252,8 @@ export default function ManageAppointment() {
         return apptDateTime < now;
       })
       .sort(
-        (a, b) => new Date(`${b.date}T${b.time}`) - new Date(`${a.date}T${a.time}`)
+        (a, b) =>
+          new Date(`${b.date}T${b.time}`) - new Date(`${a.date}T${a.time}`)
       );
   };
 
@@ -275,8 +261,8 @@ export default function ManageAppointment() {
   const previousAppointments = getPreviousAppointments();
   const cancelled = cancelledAppointments;
 
-  // -----------------------
-  // Render views based on authStage.
+  // --------------------------------------------------
+  // RENDER
   if (isLoading) {
     return <div className={containerClass}>Loading...</div>;
   }
@@ -294,7 +280,7 @@ export default function ManageAppointment() {
               <Input
                 id="phone"
                 type="tel"
-                placeholder="+27 phone number"
+                placeholder="Enter phone number"
                 value={contactNumber}
                 onChange={(e) => setContactNumber(e.target.value)}
               />
@@ -354,19 +340,22 @@ export default function ManageAppointment() {
     );
   }
 
-  // Render the appointments view if authenticated.
+  // Authenticated view
   return (
     <div className={containerClass}>
       <h1 className="text-3xl font-bold mb-8">Manage Appointments</h1>
       <Button onClick={handleLogout} className="mb-4">
         Logout
       </Button>
+
       <Tabs defaultValue="upcoming" className="w-full">
         <TabsList className="grid w-full grid-cols-3 mb-8">
           <TabsTrigger value="upcoming">Upcoming</TabsTrigger>
           <TabsTrigger value="previous">Previous</TabsTrigger>
           <TabsTrigger value="cancelled">Cancelled</TabsTrigger>
         </TabsList>
+
+        {/* Upcoming */}
         <TabsContent value="upcoming">
           {upcomingAppointments.length > 0 ? (
             <Card>
@@ -436,6 +425,8 @@ export default function ManageAppointment() {
             <p>No upcoming appointments found.</p>
           )}
         </TabsContent>
+
+        {/* Previous */}
         <TabsContent value="previous">
           {previousAppointments.length > 0 ? (
             <Card>
@@ -485,6 +476,8 @@ export default function ManageAppointment() {
             <p>No previous appointments found.</p>
           )}
         </TabsContent>
+
+        {/* Cancelled */}
         <TabsContent value="cancelled">
           {cancelled.length > 0 ? (
             <Card>
@@ -536,44 +529,43 @@ export default function ManageAppointment() {
         </TabsContent>
       </Tabs>
 
-      {/* Edit Appointment Modal */}
+      {/* ------------------------------
+          EDIT APPOINTMENT MODAL (No logic)
+       ------------------------------ */}
       {isEditModalOpen && appointmentToEdit && (
         <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
-          <div className="bg-white p-6 rounded-md w-96">
-            <h2 className="text-xl font-bold mb-4">Edit Appointment</h2>
-            <div className="space-y-4">
-              <Label htmlFor="edit-date">Date</Label>
-              <Input
-                id="edit-date"
-                type="date"
-                value={appointmentToEdit.date}
-                onChange={(e) =>
-                  setAppointmentToEdit({ ...appointmentToEdit, date: e.target.value })
-                }
-              />
-              <Label htmlFor="edit-time">Time</Label>
-              <Input
-                id="edit-time"
-                type="time"
-                value={appointmentToEdit.time}
-                onChange={(e) =>
-                  setAppointmentToEdit({ ...appointmentToEdit, time: e.target.value })
-                }
-              />
-            </div>
-            <div className="flex justify-end space-x-2 mt-4">
-              <Button variant="outline" onClick={closeEditModal}>
-                Cancel
-              </Button>
-              <Button onClick={() => onEditAppointmentSubmission(appointmentToEdit)}>
-                Save
-              </Button>
-            </div>
+          <div className="bg-white p-6 rounded-md">
+            {/* The form or placeholder goes here, but does nothing */}
+            {/* Example: If you have a custom <AppointmentForm> component, you can pass no-op callbacks */}
+            <AppointmentForm
+              appointmentToEdit={appointmentToEdit}
+              onSuccess={() => {
+                // Do nothing
+                toast("Pretend we saved the appointment!");
+              }}
+              onCancel={() => {
+                setIsEditModalOpen(false);
+                setAppointmentToEdit(null);
+              }}
+            />
+
+            {/* Alternatively, just a placeholder:
+                <h2 className="text-xl font-bold">Edit Appointment</h2>
+                <p>All fields are disabled; no actual edit logic.</p>
+                <Button onClick={() => {
+                  setIsEditModalOpen(false);
+                  setAppointmentToEdit(null);
+                }}>
+                  Close
+                </Button>
+            */}
           </div>
         </div>
       )}
 
-      {/* Cancel Appointment Confirmation Modal */}
+      {/* ------------------------------
+          CANCEL CONFIRMATION MODAL
+       ------------------------------ */}
       {isCancelModalOpen && appointmentToCancel && (
         <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
           <div className="bg-white p-6 rounded-md w-96 text-center">
